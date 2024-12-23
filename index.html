@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Bingo Musical - pbf801</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .container {
+            max-width: 800px;
+            padding: 20px;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input, button, select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .cartones {
+            display: none; /* Ocultos por defecto */
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+        .carton {
+            background: #f9f9f9;
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            width: 200px;
+            height: 200px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 5px;
+            padding: 10px;
+            justify-items: center;
+            align-items: center;
+        }
+        .carton div {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 5px;
+            text-align: center;
+            word-wrap: break-word;
+            font-size: 0.9em;
+        }
+        .carton-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .error {
+            color: red;
+            font-size: 0.9em;
+            margin-top: -10px;
+            margin-bottom: 15px;
+        }
+        .footer {
+            font-size: 0.8em;
+            color: #aaa;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Generador de Bingo Musical</h1>
+        <p>¡Genera tarjetas de bingo a partir de tus playlist favoritas!</p>
+    </header>
+    <div class="container">
+        <label for="playlist-url">URL de la Playlist de Spotify:</label>
+        <input type="text" id="playlist-url" placeholder="https://open.spotify.com/playlist/...">
+        <span id="error-url" class="error"></span>
+
+        <label for="num-cartones">Número de cartones de bingo:</label>
+        <input type="number" id="num-cartones" min="1" max="100" value="5">
+        <span id="error-cartones" class="error"></span>
+
+        <label for="songs-per-carton">Canciones por cartón (Multiples de 3):</label>
+        <input type="number" id="songs-per-carton" min="3" max="25" value="9">
+        <span id="error-songs" class="error"></span>
+
+        <label for="bingo-title">Título del bingo (opcional):</label>
+        <input type="text" id="bingo-title" placeholder="Bingo Musical">
+
+        <button id="generate">Generar Bingo Musical</button>
+        <button id="download" style="display: none;">Descargar en PDF</button>
+    </div>
+
+    <div class="cartones" id="cartones"></div>
+
+    <script>
+        const SPOTIFY_CLIENT_ID = "c27e6bd0ce4743a7a5a198c5e65110a1";
+        const SPOTIFY_CLIENT_SECRET = "08bad18fc271409687a77c244dbeda0c";
+
+        async function fetchSpotifyToken() {
+            const response = await fetch("https://accounts.spotify.com/api/token", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    Authorization: `Basic ${btoa(SPOTIFY_CLIENT_ID + ":" + SPOTIFY_CLIENT_SECRET)}`,
+                },
+                body: "grant_type=client_credentials",
+            });
+
+            if (!response.ok) {
+                throw new Error("Hay un error con el Token de Spotify");
+            }
+
+            const data = await response.json();
+            return data.access_token;
+        }
+
+        async function fetchSpotifyPlaylist(url) {
+            try {
+                const playlistId = url.split("playlist/")[1]?.split("?")[0];
+                if (!playlistId) throw new Error("No hemos encontrado esta playlist.");
+
+                const token = await fetchSpotifyToken();
+                const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error("No se pudieron obtener los datos de la playlist de Spotify.");
+                }
+
+                const data = await response.json();
+                return data.items.map(item => item.track.name);
+            } catch (error) {
+                console.error(error);
+                throw new Error("Error al obtener los datos de la playlist.");
+            }
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function validateInputs(songs, songsPerCarton, numCartones) {
+            if (songsPerCarton > songs.length) {
+                throw new Error("No hay suficientes canciones en la lista de reproducción para las canciones especificadas por tarjeta.");
+            }
+
+            const requiredSongs = songsPerCarton * numCartones;
+            if (requiredSongs < songs.length) {
+                throw new Error("No se pueden incluir todas las canciones con la configuración actual.");
+            }
+        }
+
+        function generateCartones(songs, numCartones, songsPerCarton) {
+            const cartones = [];
+            let remainingSongs = [...songs];
+
+            for (let i = 0; i < numCartones; i++) {
+                if (remainingSongs.length < songsPerCarton) {
+                    remainingSongs = [...songs];
+                }
+
+                // Ajuste para que sea múltiplo de 3
+                const mod = songsPerCarton % 3;
+                let emptySlots = 0;
+                if (mod !== 0) {
+                    emptySlots = 3 - mod; // Calculamos cuántos vacíos añadir
+                }
+
+                const totalSongs = songsPerCarton + emptySlots;
+                const shuffled = shuffle(remainingSongs);
+                const selectedSongs = shuffled.splice(0, totalSongs);
+
+                // Llenamos con canciones vacías
+                while (selectedSongs.length < totalSongs) {
+                    selectedSongs.push("Vacío");
+                }
+
+                cartones.push(selectedSongs);
+            }
+
+            return cartones;
+        }
+
+        function downloadPDF(cartones, title) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            cartones.forEach((carton, index) => {
+                if (index > 0) doc.addPage();
+
+                doc.setFontSize(12);
+                doc.text(title || "Bingo Musical", 105, 10, null, null, 'center');  // Título del Bingo
+
+                carton.forEach((song, i) => {
+                    const x = 20 + (i % 3) * 60;
+                    const y = 30 + Math.floor(i / 3) * 40;
+                    doc.rect(x, y, 50, 30);
+                    doc.text(doc.splitTextToSize(song, 45), x + 5, y + 15);
+                });
+
+                // Pie de página
+                doc.setFontSize(8);
+                doc.text(`Cartón ${index + 1}`, 20, 190);
+                doc.text("© pbf801", 180, 190, { align: "right" });
+            });
+
+            doc.save('bingo-cards.pdf');
+        }
+
+        document.getElementById('generate').addEventListener('click', async () => {
+            const url = document.getElementById('playlist-url').value;
+            const numCartones = parseInt(document.getElementById('num-cartones').value, 10);
+            const songsPerCarton = parseInt(document.getElementById('songs-per-carton').value, 10);
+            const bingoTitle = document.getElementById('bingo-title').value;
+            const errorUrl = document.getElementById('error-url');
+            const errorCartones = document.getElementById('error-cartones');
+            const errorSongs = document.getElementById('error-songs');
+            const downloadButton = document.getElementById('download');
+            const cartonesContainer = document.getElementById('cartones');
+
+            errorUrl.textContent = '';
+            errorCartones.textContent = '';
+            errorSongs.textContent = '';
+            downloadButton.style.display = 'none';
+
+            if (!url) {
+                errorUrl.textContent = 'Introduce una URL de Spotify.';
+                return;
+            }
+
+            if (!numCartones || numCartones < 1) {
+                errorCartones.textContent = 'Introduce el número de cartones.';
+                return;
+            }
+
+            try {
+                const songs = await fetchSpotifyPlaylist(url);
+                validateInputs(songs, songsPerCarton, numCartones);
+                const cartones = generateCartones(songs, numCartones, songsPerCarton);
+
+                cartonesContainer.style.display = 'none'; // Ocultar cartones generados
+                downloadButton.style.display = 'block'; // Mostrar botón de descarga
+                downloadButton.onclick = () => downloadPDF(cartones, bingoTitle);
+            } catch (error) {
+                errorUrl.textContent = error.message;
+            }
+        });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+</body>
+</html>
